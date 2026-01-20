@@ -61,7 +61,7 @@ func handleInput() {
 				if _, isCommand := commandList[args[0]]; isCommand {
 					fmt.Fprintf(os.Stdout, "%s is a shell builtin\n", args[0])
 				} else {
-					fmt.Fprintf(os.Stdout, "%s: command not found\n", args[0])
+					fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
 				}
 			}
 		}
