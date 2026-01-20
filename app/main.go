@@ -24,7 +24,7 @@ func main() {
 		fmt.Println(command + ": command not found")
 	}
 	if commandType == 1 {
-		os.Exit(1)
+		os.Exit(0)
 	}
 	main()
 }
