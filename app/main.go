@@ -15,6 +15,7 @@ type Command struct {
 var commandList = map[string]Command{
 	"exit": {name: "exit", execute: func() error { return nil }},
 	"echo": {name: "echo", execute: func() error { return nil }},
+	"type": {name: "type", execute: func() error { return nil }},
 }
 
 func printPrompt() {
@@ -46,12 +47,23 @@ func handleInput() {
 	args := parts[1:]
 
 	if command, exists := commandList[commandAsString]; exists {
-		if command.name == "exit" {
-			os.Exit(0)
-		}
-
-		if command.name == "echo" {
-			fmt.Fprintln(os.Stdout, strings.Join(args, " "))
+		switch command.name {
+		case "exit":
+			{
+				os.Exit(0)
+			}
+		case "echo":
+			{
+				fmt.Fprintln(os.Stdout, strings.Join(args, " "))
+			}
+		case "type":
+			{
+				if _, isCommand := commandList[args[0]]; isCommand {
+					fmt.Fprintf(os.Stdout, "%s: is a shell builtin\n", args[0])
+				} else {
+					fmt.Fprintf(os.Stdout, "%s: command not found\n", args[0])
+				}
+			}
 		}
 
 		if err := command.execute(); err != nil {
