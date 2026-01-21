@@ -5,134 +5,123 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
-type Command struct {
-	name    string
-	execute func() error
-}
+type BuiltinHandler func(args []string) error
 
-var commandList = map[string]Command{
-	"exit": {name: "exit", execute: func() error { return nil }},
-	"echo": {name: "echo", execute: func() error { return nil }},
-	"type": {name: "type", execute: func() error { return nil }},
-}
+var builtinsRegistry = map[string]BuiltinHandler{}
 
-func printPrompt() {
-	fmt.Print("$ ")
+func initMap() {
+	builtinsRegistry["exit"] = exitCmd
+	builtinsRegistry["echo"] = echoCmd
+	builtinsRegistry["type"] = typeCmd
+	builtinsRegistry["pwd"] = pwdCmd
 }
 
 func main() {
-	printPrompt()
-	handleInput()
-	main()
+	initMap()
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("$ ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error reading input:", err)
+			continue
+		}
+		handleInput(strings.TrimSpace(input))
+	}
 }
 
-func handleInput() {
-	input, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	path := os.Getenv("PATH")
-
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error reading input:", err)
-		os.Exit(1)
-	}
-
-	input = strings.TrimSpace(input)
-	parts := strings.Fields(input)
-
-	if len(parts) <= 0 {
+func handleInput(input string) {
+	if input == "" {
 		return
 	}
 
-	commandAsString := parts[0]
+	parts := strings.Fields(input)
+	cmdName := parts[0]
 	args := parts[1:]
 
-	if command, exists := commandList[commandAsString]; exists {
-		switch command.name {
-		case "exit":
-			{
-				os.Exit(0)
-			}
-		case "echo":
-			{
-				fmt.Fprintln(os.Stdout, strings.Join(args, " "))
-			}
-		case "type":
-			{
-				typeCommand(args, path)
-			}
+	if execute, exists := builtinsRegistry[cmdName]; exists {
+		if err := execute(args); err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
 		}
-
-		if err := command.execute(); err != nil {
-			fmt.Fprintln(os.Stderr, "Error executing command:", err)
-		}
-	} else {
-		executeExternalProgram(parts, path)
-	}
-}
-
-func typeCommand(args []string, path string) {
-	if _, isCommand := commandList[args[0]]; isCommand {
-		fmt.Fprintf(os.Stdout, "%s is a shell builtin\n", args[0])
-	} else if path != "" {
-		_ = searchExternalCommand(path, args)
-	} else {
-		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
-	}
-}
-
-func searchExternalCommand(path string, args []string) string {
-	paths := strings.Split(path, ":")
-	found := false
-	for _, p := range paths {
-		fullPath := fmt.Sprintf("%s/%s", p, args[0])
-		if _, err := os.Stat(fullPath); err == nil {
-			if isExecutable(fullPath) {
-				fmt.Fprintf(os.Stdout, "%s is %s\n", args[0], fullPath)
-				found = true
-				return fullPath
-			}
-		}
-	}
-	if !found {
-		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
-	}
-	return ""
-}
-
-func isExecutable(filePath string) bool {
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return false
-	}
-	return info.Mode().IsRegular() && info.Mode()&0111 != 0
-}
-
-func findExecutablePath(path string, command string) string {
-	paths := strings.Split(path, ":")
-	for _, p := range paths {
-		fullPath := fmt.Sprintf("%s/%s", p, command)
-		if _, err := os.Stat(fullPath); err == nil {
-			if isExecutable(fullPath) {
-				return fullPath
-			}
-		}
-	}
-	return ""
-}
-
-func executeExternalProgram(args []string, path string) {
-	programPath := findExecutablePath(path, args[0])
-	if programPath == "" {
-		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
 		return
 	}
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Path = programPath
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Println("Error:", err)
+
+	if path, found := findInPath(cmdName); found {
+		runExtenalCommand(path, cmdName, args)
+		return
 	}
-	fmt.Print(string(out))
+
+	fmt.Fprintf(os.Stderr, "%s: command not found\n", cmdName)
+}
+
+func exitCmd(args []string) error {
+	os.Exit(0)
+	return nil
+}
+
+func echoCmd(args []string) error {
+	fmt.Println(strings.Join(args, " "))
+	return nil
+}
+
+func pwdCmd(args []string) error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	fmt.Println(dir)
+	return nil
+}
+
+func typeCmd(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	command := args[0]
+
+	if _, isBuiltins := builtinsRegistry[command]; isBuiltins {
+		fmt.Printf("%s is a shell builtin\n", command)
+		return nil
+	}
+
+	if path, found := findInPath(command); found {
+		fmt.Printf("%s is %s\n", command, path)
+		return nil
+	}
+
+	fmt.Printf("%s: not found\n", command)
+	return nil
+}
+
+func findInPath(command string) (string, bool) {
+	pathEnv := os.Getenv("PATH")
+	paths := filepath.SplitList(pathEnv)
+
+	for _, dir := range paths {
+		fullPath := filepath.Join(dir, command)
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			if info.Mode()&0111 != 0 {
+				return fullPath, true
+			}
+		}
+	}
+	return "", false
+}
+
+func runExtenalCommand(path, cmdName string, args []string) {
+	cmd := exec.Command(path, args...)
+	cmd.Args[0] = cmdName
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			fmt.Fprintln(os.Stderr, "Execution error:", err)
+		}
+	}
 }
