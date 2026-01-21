@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -67,7 +68,7 @@ func handleInput() {
 			fmt.Fprintln(os.Stderr, "Error executing command:", err)
 		}
 	} else {
-		fmt.Fprintf(os.Stdout, "%s: command not found\n", commandAsString)
+		executeExternalProgram(parts, path)
 	}
 }
 
@@ -75,24 +76,29 @@ func typeCommand(args []string, path string) {
 	if _, isCommand := commandList[args[0]]; isCommand {
 		fmt.Fprintf(os.Stdout, "%s is a shell builtin\n", args[0])
 	} else if path != "" {
-		paths := strings.Split(path, ":")
-		found := false
-		for _, p := range paths {
-			fullPath := fmt.Sprintf("%s/%s", p, args[0])
-			if _, err := os.Stat(fullPath); err == nil {
-				if isExecutable(fullPath) {
-					fmt.Fprintf(os.Stdout, "%s is %s\n", args[0], fullPath)
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
-		}
+		_ = searchExternalCommand(path, args)
 	} else {
 		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
 	}
+}
+
+func searchExternalCommand(path string, args []string) string {
+	paths := strings.Split(path, ":")
+	found := false
+	for _, p := range paths {
+		fullPath := fmt.Sprintf("%s/%s", p, args[0])
+		if _, err := os.Stat(fullPath); err == nil {
+			if isExecutable(fullPath) {
+				fmt.Fprintf(os.Stdout, "%s is %s\n", args[0], fullPath)
+				found = true
+				return fullPath
+			}
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
+	}
+	return ""
 }
 
 func isExecutable(filePath string) bool {
@@ -101,4 +107,32 @@ func isExecutable(filePath string) bool {
 		return false
 	}
 	return info.Mode().IsRegular() && info.Mode()&0111 != 0
+}
+
+func findExecutablePath(path string, command string) string {
+	paths := strings.Split(path, ":")
+	for _, p := range paths {
+		fullPath := fmt.Sprintf("%s/%s", p, command)
+		if _, err := os.Stat(fullPath); err == nil {
+			if isExecutable(fullPath) {
+				return fullPath
+			}
+		}
+	}
+	return ""
+}
+
+func executeExternalProgram(args []string, path string) {
+	programPath := findExecutablePath(path, args[0])
+	if programPath == "" {
+		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
+		return
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Path = programPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+	fmt.Print(string(out))
 }
