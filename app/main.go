@@ -30,6 +30,7 @@ func main() {
 
 func handleInput() {
 	input, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	path := os.Getenv("PATH")
 
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error reading input:", err)
@@ -58,11 +59,7 @@ func handleInput() {
 			}
 		case "type":
 			{
-				if _, isCommand := commandList[args[0]]; isCommand {
-					fmt.Fprintf(os.Stdout, "%s is a shell builtin\n", args[0])
-				} else {
-					fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
-				}
+				typeCommand(args, path)
 			}
 		}
 
@@ -72,4 +69,36 @@ func handleInput() {
 	} else {
 		fmt.Fprintf(os.Stdout, "%s: command not found\n", commandAsString)
 	}
+}
+
+func typeCommand(args []string, path string) {
+	if _, isCommand := commandList[args[0]]; isCommand {
+		fmt.Fprintf(os.Stdout, "%s is a shell builtin\n", args[0])
+	} else if path != "" {
+		paths := strings.Split(path, ":")
+		found := false
+		for _, p := range paths {
+			fullPath := fmt.Sprintf("%s/%s", p, args[0])
+			if _, err := os.Stat(fullPath); err == nil {
+				if isExecutable(fullPath) {
+					fmt.Fprintf(os.Stdout, "%s is %s\n", args[0], fullPath)
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
+		}
+	} else {
+		fmt.Fprintf(os.Stdout, "%s: not found\n", args[0])
+	}
+}
+
+func isExecutable(filePath string) bool {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular() && info.Mode()&0111 != 0
 }
