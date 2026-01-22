@@ -80,11 +80,18 @@ func pwdCmd(args []string) error {
 }
 
 func cdCmd(args []string) error {
-	err := os.Chdir(args[0])
+	var newDirectory string
+	if args[0] == "~" {
+		newDirectory = os.Getenv("HOME")
+	} else {
+		newDirectory = args[0]
+	}
+	err := os.Chdir(newDirectory)
 	if err != nil {
 		return errors.New("cd: " + args[0] + ": No such file or directory")
 	}
 	return nil
+
 }
 
 func typeCmd(args []string) error {
