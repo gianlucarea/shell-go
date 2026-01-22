@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ func initMap() {
 	builtinsRegistry["echo"] = echoCmd
 	builtinsRegistry["type"] = typeCmd
 	builtinsRegistry["pwd"] = pwdCmd
+	builtinsRegistry["cd"] = cdCmd
 }
 
 func main() {
@@ -45,7 +47,7 @@ func handleInput(input string) {
 
 	if execute, exists := builtinsRegistry[cmdName]; exists {
 		if err := execute(args); err != nil {
-			fmt.Fprintln(os.Stderr, "Error:", err)
+			fmt.Fprintln(os.Stderr, err)
 		}
 		return
 	}
@@ -74,6 +76,14 @@ func pwdCmd(args []string) error {
 		return err
 	}
 	fmt.Println(dir)
+	return nil
+}
+
+func cdCmd(args []string) error {
+	err := os.Chdir(args[0])
+	if err != nil {
+		return errors.New("cd: " + args[0] + ": No such file or directory")
+	}
 	return nil
 }
 
