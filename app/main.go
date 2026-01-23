@@ -44,7 +44,6 @@ func handleInput(input string) {
 	parts := parseInput(input)
 	cmdName := parts[0]
 	args := parts[1:]
-
 	if execute, exists := builtinsRegistry[cmdName]; exists {
 		if err := execute(args); err != nil {
 			fmt.Fprintln(os.Stderr, err)
