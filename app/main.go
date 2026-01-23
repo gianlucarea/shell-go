@@ -41,7 +41,7 @@ func handleInput(input string) {
 		return
 	}
 
-	parts := strings.Fields(input)
+	parts := parseInput(input)
 	cmdName := parts[0]
 	args := parts[1:]
 
@@ -141,4 +141,38 @@ func runExtenalCommand(path, cmdName string, args []string) {
 			fmt.Fprintln(os.Stderr, "Execution error:", err)
 		}
 	}
+}
+
+func parseInput(input string) []string {
+	var args []string
+	var current strings.Builder
+	inSingleQuotes := false
+
+	for i := 0; i < len(input); i++ {
+		char := input[i]
+		if inSingleQuotes {
+			if char == '\'' {
+				inSingleQuotes = false
+			} else {
+				current.WriteByte(char)
+			}
+		} else {
+			if char == '\'' {
+				inSingleQuotes = true
+			} else if char == ' ' || char == '\t' {
+				if current.Len() > 0 {
+					args = append(args, current.String())
+					current.Reset()
+				}
+			} else {
+				current.WriteByte(char)
+			}
+		}
+	}
+
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+
+	return args
 }
