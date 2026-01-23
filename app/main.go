@@ -146,33 +146,54 @@ func runExtenalCommand(path, cmdName string, args []string) {
 func parseInput(input string) []string {
 	var args []string
 	var current strings.Builder
-	inSingleQuotes := false
+	isSingleQuotes := false
+	isDoubleQuotes := false
+	escaped := false
 
 	for i := 0; i < len(input); i++ {
 		char := input[i]
-		if inSingleQuotes {
+		if escaped {
+			current.WriteByte(char)
+			escaped = false
+			continue
+		}
+
+		if isSingleQuotes {
 			if char == '\'' {
-				inSingleQuotes = false
+				isSingleQuotes = false
 			} else {
 				current.WriteByte(char)
 			}
+		} else if isDoubleQuotes {
+			switch char {
+			case '"':
+				isDoubleQuotes = false
+			case '\\':
+				escaped = true
+			default:
+				current.WriteByte(char)
+			}
 		} else {
-			if char == '\'' {
-				inSingleQuotes = true
-			} else if char == ' ' || char == '\t' {
+			switch char {
+			case '\'':
+				isSingleQuotes = true
+			case '"':
+				isDoubleQuotes = true
+			case '\\':
+				escaped = true
+			case ' ', '\t':
 				if current.Len() > 0 {
 					args = append(args, current.String())
 					current.Reset()
 				}
-			} else {
+			default:
 				current.WriteByte(char)
 			}
 		}
 	}
-
 	if current.Len() > 0 {
 		args = append(args, current.String())
+		current.Reset()
 	}
-
 	return args
 }
