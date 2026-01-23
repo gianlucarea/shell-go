@@ -147,15 +147,9 @@ func parseInput(input string) []string {
 	var current strings.Builder
 	isSingleQuotes := false
 	isDoubleQuotes := false
-	escaped := false
 
 	for i := 0; i < len(input); i++ {
 		char := input[i]
-		if escaped {
-			current.WriteByte(char)
-			escaped = false
-			continue
-		}
 
 		if isSingleQuotes {
 			if char == '\'' {
@@ -164,28 +158,33 @@ func parseInput(input string) []string {
 				current.WriteByte(char)
 			}
 		} else if isDoubleQuotes {
-			switch char {
-			case '"':
+			if char == '"' {
 				isDoubleQuotes = false
-			case '\\':
-				escaped = true
-			default:
+			} else if char == '\\' && i+1 < len(input) {
+				nextChar := input[i+1]
+				if nextChar == '$' || nextChar == '`' || nextChar == '"' || nextChar == '\\' || nextChar == '\n' {
+					current.WriteByte(nextChar)
+					i++
+				} else {
+					current.WriteByte(char)
+				}
+			} else {
 				current.WriteByte(char)
 			}
 		} else {
-			switch char {
-			case '\'':
+			if char == '\\' && i+1 < len(input) {
+				current.WriteByte(input[i+1])
+				i++
+			} else if char == '\'' {
 				isSingleQuotes = true
-			case '"':
+			} else if char == '"' {
 				isDoubleQuotes = true
-			case '\\':
-				escaped = true
-			case ' ', '\t':
+			} else if char == ' ' || char == '\t' {
 				if current.Len() > 0 {
 					args = append(args, current.String())
 					current.Reset()
 				}
-			default:
+			} else {
 				current.WriteByte(char)
 			}
 		}
