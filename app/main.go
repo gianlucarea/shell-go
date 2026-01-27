@@ -22,7 +22,7 @@ func initMap() {
 }
 
 var operatorsSet = map[string]bool{
-	">": true, "1>": true, "2>": true, ">>": true, "1>>": true,
+	">": true, "1>": true, "2>": true, ">>": true, "1>>": true, "2>>": true,
 }
 
 func main() {
@@ -55,7 +55,7 @@ func handleInput(input string) {
 		if operatorsSet[part] && i+1 < len(parts) {
 			redirectIndex = i
 			outputFile = parts[i+1]
-			if part == "2>" {
+			if part == "2>" || part == "2>>" {
 				redirectError = true
 			}
 			break
