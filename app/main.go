@@ -11,9 +11,21 @@ import (
 
 type BuiltinHandler func(args []string, stdout, stderr *os.File) error
 
-var builtinsRegistry = map[string]BuiltinHandler{}
+type RedirectConfig struct {
+	file     string
+	isError  bool
+	isAppend bool
+}
 
-func initMap() {
+var (
+	builtinsRegistry = map[string]BuiltinHandler{}
+	operatorsSet     = map[string]bool{
+		">": true, "1>": true, "2>": true,
+		">>": true, "1>>": true, "2>>": true,
+	}
+)
+
+func init() {
 	builtinsRegistry["exit"] = exitCmd
 	builtinsRegistry["echo"] = echoCmd
 	builtinsRegistry["type"] = typeCmd
@@ -21,19 +33,13 @@ func initMap() {
 	builtinsRegistry["cd"] = cdCmd
 }
 
-var operatorsSet = map[string]bool{
-	">": true, "1>": true, "2>": true, ">>": true, "1>>": true, "2>>": true,
-}
-
 func main() {
-	initMap()
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("$ ")
 		input, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error reading input:", err)
-			continue
+			break
 		}
 		handleInput(strings.TrimSpace(input))
 	}
@@ -45,47 +51,17 @@ func handleInput(input string) {
 	}
 
 	parts := parseInput(input)
+	args, redir := extractRedirection(parts)
 
-	var args []string
-	var outputFile string
-	var redirectError bool = false
-	redirectIndex := -1
-
-	for i, part := range parts {
-		if operatorsSet[part] && i+1 < len(parts) {
-			redirectIndex = i
-			outputFile = parts[i+1]
-			if part == "2>" || part == "2>>" {
-				redirectError = true
-			}
-			break
-		}
+	if len(args) == 0 {
+		return
 	}
 
-	if redirectIndex != -1 {
-		args = parts[:redirectIndex]
-	} else {
-		args = parts
-	}
+	stdout, stderr, cleanup := setupStreams(redir)
+	defer cleanup()
 
 	cmdName := args[0]
 	cmdArgs := args[1:]
-
-	stdout := os.Stdout
-	stderr := os.Stderr
-
-	if outputFile != "" {
-		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-		}
-		defer f.Close()
-		if redirectError {
-			stderr = f
-		} else {
-			stdout = f
-		}
-	}
 
 	if execute, exists := builtinsRegistry[cmdName]; exists {
 		if err := execute(cmdArgs, stdout, stderr); err != nil {
@@ -95,24 +71,82 @@ func handleInput(input string) {
 	}
 
 	if path, found := findInPath(cmdName); found {
-		runExtenalCommand(path, cmdName, cmdArgs, stdout, stderr)
+		runExternalCommand(path, cmdName, cmdArgs, stdout, stderr)
 		return
 	}
 
 	fmt.Fprintf(stderr, "%s: command not found\n", cmdName)
 }
 
-func exitCmd(args []string, stdout, stderr *os.File) error {
+func extractRedirection(parts []string) ([]string, *RedirectConfig) {
+	for i, part := range parts {
+		if operatorsSet[part] && i+1 < len(parts) {
+			return parts[:i], &RedirectConfig{
+				file:     parts[i+1],
+				isError:  strings.HasPrefix(part, "2"),
+				isAppend: strings.Contains(part, ">>"),
+			}
+		}
+	}
+	return parts, nil
+}
+
+func setupStreams(redir *RedirectConfig) (*os.File, *os.File, func()) {
+	stdout, stderr := os.Stdout, os.Stderr
+	var closer *os.File
+
+	if redir != nil {
+		flags := os.O_WRONLY | os.O_CREATE
+		if redir.isAppend {
+			flags |= os.O_APPEND
+		} else {
+			flags |= os.O_TRUNC
+		}
+
+		f, err := os.OpenFile(redir.file, flags, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shell: %v\n", err)
+		} else {
+			closer = f
+			if redir.isError {
+				stderr = f
+			} else {
+				stdout = f
+			}
+		}
+	}
+
+	cleanup := func() {
+		if closer != nil {
+			closer.Close()
+		}
+	}
+	return stdout, stderr, cleanup
+}
+
+func runExternalCommand(path, name string, args []string, stdout, stderr *os.File) {
+	cmd := exec.Command(path, args...)
+	cmd.Args[0] = name
+	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			fmt.Fprintln(stderr, "Execution error:", err)
+		}
+	}
+}
+
+func exitCmd(_ []string, _, _ *os.File) error {
 	os.Exit(0)
 	return nil
 }
 
-func echoCmd(args []string, stdout, stderr *os.File) error {
-	stdout.WriteString(strings.Join(args, " ") + "\n")
+func echoCmd(args []string, stdout, _ *os.File) error {
+	fmt.Fprintln(stdout, strings.Join(args, " "))
 	return nil
 }
 
-func pwdCmd(args []string, stdout, stderr *os.File) error {
+func pwdCmd(_ []string, stdout, _ *os.File) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -121,44 +155,39 @@ func pwdCmd(args []string, stdout, stderr *os.File) error {
 	return nil
 }
 
-func cdCmd(args []string, stdout, stderr *os.File) error {
-	var newDirectory string
-	if args[0] == "~" {
-		newDirectory = os.Getenv("HOME")
-	} else {
-		newDirectory = args[0]
-	}
-	err := os.Chdir(newDirectory)
-	if err != nil {
-		return fmt.Errorf("cd: %s: No such file or directory", newDirectory)
-	}
-	return nil
-
-}
-
-func typeCmd(args []string, stdout, stderr *os.File) error {
+func cdCmd(args []string, _, _ *os.File) error {
 	if len(args) == 0 {
 		return nil
 	}
-	command := args[0]
+	path := args[0]
+	if path == "~" {
+		path = os.Getenv("HOME")
+	}
+	if err := os.Chdir(path); err != nil {
+		return fmt.Errorf("cd: %s: No such file or directory", path)
+	}
+	return nil
+}
 
-	if _, isBuiltins := builtinsRegistry[command]; isBuiltins {
-		fmt.Fprintf(stdout, "%s is a shell builtin\n", command)
+func typeCmd(args []string, stdout, _ *os.File) error {
+	if len(args) == 0 {
 		return nil
 	}
+	cmd := args[0]
 
-	if path, found := findInPath(command); found {
-		fmt.Fprintf(stdout, "%s is %s\n", command, path)
+	if _, ok := builtinsRegistry[cmd]; ok {
+		fmt.Fprintf(stdout, "%s is a shell builtin\n", cmd)
 		return nil
 	}
-
-	return fmt.Errorf("%s: not found", command)
+	if path, found := findInPath(cmd); found {
+		fmt.Fprintf(stdout, "%s is %s\n", cmd, path)
+		return nil
+	}
+	return fmt.Errorf("%s: not found", cmd)
 }
 
 func findInPath(command string) (string, bool) {
-	pathEnv := os.Getenv("PATH")
-	paths := filepath.SplitList(pathEnv)
-
+	paths := filepath.SplitList(os.Getenv("PATH"))
 	for _, dir := range paths {
 		fullPath := filepath.Join(dir, command)
 		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
@@ -170,42 +199,25 @@ func findInPath(command string) (string, bool) {
 	return "", false
 }
 
-func runExtenalCommand(path, cmdName string, args []string, stdout, stderr *os.File) {
-	cmd := exec.Command(path, args...)
-	cmd.Args[0] = cmdName
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); !ok {
-			fmt.Fprintln(os.Stderr, "Execution error:", err)
-		}
-	}
-}
-
 func parseInput(input string) []string {
 	var args []string
 	var current strings.Builder
-	isSingleQuotes := false
-	isDoubleQuotes := false
+	isSingleQuote, isDoubleQuote := false, false
 
 	for i := 0; i < len(input); i++ {
 		char := input[i]
-
-		if isSingleQuotes {
+		if isSingleQuote {
 			if char == '\'' {
-				isSingleQuotes = false
+				isSingleQuote = false
 			} else {
 				current.WriteByte(char)
 			}
-		} else if isDoubleQuotes {
+		} else if isDoubleQuote {
 			if char == '"' {
-				isDoubleQuotes = false
+				isDoubleQuote = false
 			} else if char == '\\' && i+1 < len(input) {
-				nextChar := input[i+1]
-				if nextChar == '$' || nextChar == '`' || nextChar == '"' || nextChar == '\\' || nextChar == '\n' {
-					current.WriteByte(nextChar)
+				if strings.ContainsRune("$`\"\\\n", rune(input[i+1])) {
+					current.WriteByte(input[i+1])
 					i++
 				} else {
 					current.WriteByte(char)
@@ -218,9 +230,9 @@ func parseInput(input string) []string {
 				current.WriteByte(input[i+1])
 				i++
 			} else if char == '\'' {
-				isSingleQuotes = true
+				isSingleQuote = true
 			} else if char == '"' {
-				isDoubleQuotes = true
+				isDoubleQuote = true
 			} else if char == ' ' || char == '\t' {
 				if current.Len() > 0 {
 					args = append(args, current.String())
@@ -233,7 +245,6 @@ func parseInput(input string) []string {
 	}
 	if current.Len() > 0 {
 		args = append(args, current.String())
-		current.Reset()
 	}
 	return args
 }
