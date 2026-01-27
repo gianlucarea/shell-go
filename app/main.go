@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-type BuiltinHandler func(args []string, stdout *os.File) error
+type BuiltinHandler func(args []string, stdout, stderr *os.File) error
 
 var builtinsRegistry = map[string]BuiltinHandler{}
 
@@ -44,12 +44,16 @@ func handleInput(input string) {
 
 	var args []string
 	var outputFile string
+	var redirectError bool = false
 	redirectIndex := -1
 
 	for i, part := range parts {
-		if (part == ">" || part == "1>") && i+1 < len(parts) {
+		if (part == ">" || part == "1>" || part == "2>") && i+1 < len(parts) {
 			redirectIndex = i
 			outputFile = parts[i+1]
+			if part == "2>" {
+				redirectError = true
+			}
 			break
 		}
 	}
@@ -64,41 +68,47 @@ func handleInput(input string) {
 	cmdArgs := args[1:]
 
 	stdout := os.Stdout
+	stderr := os.Stderr
+
 	if outputFile != "" {
 		f, err := os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 		}
 		defer f.Close()
-		stdout = f
+		if redirectError {
+			stderr = f
+		} else {
+			stdout = f
+		}
 	}
 
 	if execute, exists := builtinsRegistry[cmdName]; exists {
-		if err := execute(cmdArgs, stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if err := execute(cmdArgs, stdout, stderr); err != nil {
+			fmt.Fprintln(stderr, err)
 		}
 		return
 	}
 
 	if path, found := findInPath(cmdName); found {
-		runExtenalCommand(path, cmdName, cmdArgs, stdout)
+		runExtenalCommand(path, cmdName, cmdArgs, stdout, stderr)
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "%s: command not found\n", cmdName)
+	fmt.Fprintf(stderr, "%s: command not found\n", cmdName)
 }
 
-func exitCmd(args []string, stdout *os.File) error {
+func exitCmd(args []string, stdout, stderr *os.File) error {
 	os.Exit(0)
 	return nil
 }
 
-func echoCmd(args []string, stdout *os.File) error {
+func echoCmd(args []string, stdout, stderr *os.File) error {
 	fmt.Fprintln(stdout, strings.Join(args, " "))
 	return nil
 }
 
-func pwdCmd(args []string, stdout *os.File) error {
+func pwdCmd(args []string, stdout, stderr *os.File) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -107,7 +117,7 @@ func pwdCmd(args []string, stdout *os.File) error {
 	return nil
 }
 
-func cdCmd(args []string, stdout *os.File) error {
+func cdCmd(args []string, stdout, stderr *os.File) error {
 	var newDirectory string
 	if args[0] == "~" {
 		newDirectory = os.Getenv("HOME")
@@ -116,13 +126,13 @@ func cdCmd(args []string, stdout *os.File) error {
 	}
 	err := os.Chdir(newDirectory)
 	if err != nil {
-		return fmt.Errorf("cd: %s: No such file or directory", args[0])
+		return fmt.Errorf("cd: %s: No such file or directory", newDirectory)
 	}
 	return nil
 
 }
 
-func typeCmd(args []string, stdout *os.File) error {
+func typeCmd(args []string, stdout, stderr *os.File) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -138,8 +148,7 @@ func typeCmd(args []string, stdout *os.File) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "%s: not found\n", command)
-	return nil
+	return fmt.Errorf("%s: not found", command)
 }
 
 func findInPath(command string) (string, bool) {
@@ -157,11 +166,11 @@ func findInPath(command string) (string, bool) {
 	return "", false
 }
 
-func runExtenalCommand(path, cmdName string, args []string, stdout *os.File) {
+func runExtenalCommand(path, cmdName string, args []string, stdout, stderr *os.File) {
 	cmd := exec.Command(path, args...)
 	cmd.Args[0] = cmdName
 	cmd.Stdout = stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = stderr
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Run(); err != nil {
