@@ -21,6 +21,10 @@ func initMap() {
 	builtinsRegistry["cd"] = cdCmd
 }
 
+var operatorsSet = map[string]bool{
+	">": true, "1>": true, "2>": true, ">>": true, "1>>": true,
+}
+
 func main() {
 	initMap()
 	reader := bufio.NewReader(os.Stdin)
@@ -48,7 +52,7 @@ func handleInput(input string) {
 	redirectIndex := -1
 
 	for i, part := range parts {
-		if (part == ">" || part == "1>" || part == "2>") && i+1 < len(parts) {
+		if operatorsSet[part] && i+1 < len(parts) {
 			redirectIndex = i
 			outputFile = parts[i+1]
 			if part == "2>" {
@@ -71,7 +75,7 @@ func handleInput(input string) {
 	stderr := os.Stderr
 
 	if outputFile != "" {
-		f, err := os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 		}
@@ -104,7 +108,7 @@ func exitCmd(args []string, stdout, stderr *os.File) error {
 }
 
 func echoCmd(args []string, stdout, stderr *os.File) error {
-	fmt.Fprintln(stdout, strings.Join(args, " "))
+	stdout.WriteString(strings.Join(args, " ") + "\n")
 	return nil
 }
 
