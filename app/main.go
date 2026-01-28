@@ -1,22 +1,48 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"github.com/chzyer/readline"
 	"github.com/codecrafters-io/shell-starter-go/app/shell"
 )
 
 func main() {
-	reader := bufio.NewReader(os.Stdin)
+	completer := readline.NewPrefixCompleter(
+		readline.PcItem("echo"),
+		readline.PcItem("exit"),
+	)
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:       "$ ",
+		AutoComplete: completer,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "readline setup:", err)
+		os.Exit(1)
+	}
+	defer rl.Close()
+
 	for {
-		fmt.Print("$ ")
-		input, err := reader.ReadString('\n')
-		if err != nil {
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt {
+			if len(line) == 0 {
+				break
+			}
+			continue
+		} else if err == io.EOF {
+			break
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, "read error:", err)
 			break
 		}
-		shell.HandleInput(strings.TrimSpace(input))
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		shell.HandleInput(line)
 	}
 }
